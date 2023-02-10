@@ -83,6 +83,7 @@ func main() {
 	builder := pitaya.NewDefaultBuilder(*isFrontend, *svType, pitaya.Cluster, map[string]string{}, *config.NewDefaultBuilderConfig())
 	if *isFrontend {
 		tcp := acceptor.NewTCPAcceptor(fmt.Sprintf(":%d", *port))
+		builder.AddAcceptor(acceptor.NewWSAcceptor(":3250"))
 		builder.AddAcceptor(tcp)
 	}
 	builder.Groups = groups.NewMemoryGroupService(*config.NewDefaultMemoryGroupConfig())
@@ -95,7 +96,7 @@ func main() {
 	if !*isFrontend {
 		configureBackend()
 		http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
-		go http.ListenAndServe(":3251", nil)
+		go http.ListenAndServe(":8080", nil)
 	} else {
 		configureFrontend(*port)
 	}
