@@ -441,9 +441,8 @@
   };
 
   var handshake = function(data) {
-    var pack = Package.decode(data);
-    var json = new TextDecoder().decode(pack.data);
-    console.log(pack.type, json);
+    var json = new TextDecoder().decode(data);
+    console.log(json);
     console.debug(Protocol.strdecode(data));
     data = JSON.parse(Protocol.strdecode(data));
     if(data.code === RES_OLD_CLIENT) {
