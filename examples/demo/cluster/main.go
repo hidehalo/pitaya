@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-
+	"net/http"
 	"strings"
 
 	"github.com/topfreegames/pitaya/v2"
@@ -94,6 +94,8 @@ func main() {
 
 	if !*isFrontend {
 		configureBackend()
+		http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
+		go http.ListenAndServe(":3251", nil)
 	} else {
 		configureFrontend(*port)
 	}
