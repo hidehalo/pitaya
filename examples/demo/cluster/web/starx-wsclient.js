@@ -441,8 +441,8 @@
   };
 
   var handshake = function(data) {
-    console.debug(new TextDecoder().decode(data));
-    data = JSON.parse(new TextDecoder().decode(data));
+    console.debug(Package.decode(data));
+    data = Package.decode(data);
     if(data.code === RES_OLD_CLIENT) {
       starx.emit('error', 'client version not fullfill');
       return;
