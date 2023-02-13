@@ -36,7 +36,7 @@
                     starx.on("onNewUser", this.onNewUser);
                     starx.on("onMembers", this.onMembers);
                     starx.on('onMessage', this.onMessage);
-                    starx.request("room.room.join", {}, join);
+                    starx.request("room.room.join", {}, this.join);
                 })
             },
             methods: {
