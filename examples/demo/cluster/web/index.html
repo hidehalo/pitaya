@@ -31,7 +31,7 @@
                 messages: []
             },
             created() {
-                starx.init({ host: window.location.hostname, port: 3250, path: '/' }, function () {
+                starx.init({ host: window.location.hostname, port: 3250, path: '/' }, () => {
                     console.log("initialized");
                     starx.on("onNewUser", this.onNewUser);
                     starx.on("onMembers", this.onMembers);
