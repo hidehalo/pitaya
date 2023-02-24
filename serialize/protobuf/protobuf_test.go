@@ -27,8 +27,13 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/topfreegames/pitaya/v2/constants"
+	worldPb "github.com/topfreegames/pitaya/v2/examples/demo/cluster/proto"
 	"github.com/topfreegames/pitaya/v2/helpers"
 	"github.com/topfreegames/pitaya/v2/protos"
+
+	// "google.golang.org/protobuf/proto"
+	"github.com/golang/protobuf/jsonpb"
+	"github.com/golang/protobuf/proto"
 )
 
 var update = flag.Bool("update", false, "update .golden files")
@@ -46,6 +51,13 @@ func TestMarshal(t *testing.T) {
 	}{
 		"test_ok":            {&protos.Response{Data: []byte("data"), Error: &protos.Error{Msg: "error"}}, nil},
 		"test_not_a_message": {"invalid", constants.ErrWrongValueType},
+		"test_pboneof": {
+			&worldPb.SyncAction{
+				Uuid: "1",
+				Type: worldPb.ActionType_MOVE,
+			},
+			nil,
+		},
 	}
 	serializer := NewSerializer()
 
@@ -60,7 +72,6 @@ func TestMarshal(t *testing.T) {
 					t.Log("updating golden file")
 					helpers.WriteFile(t, gp, result)
 				}
-
 				expected := helpers.ReadFile(t, gp)
 				assert.Equal(t, expected, result)
 			} else {
@@ -94,6 +105,47 @@ func TestUnmarshal(t *testing.T) {
 			if table.err == nil {
 				assert.Equal(t, table.expected, result)
 			}
+		})
+	}
+}
+
+func TestGoogleProtoBuffer(t *testing.T) {
+	uuid := "2"
+
+	var unmarshalTables = map[string]struct {
+		expected interface{}
+	}{
+		"test_pboneof": {
+			&worldPb.SyncAction{
+				Uuid: "1",
+				Type: worldPb.ActionType_MOVE,
+				Payload: &worldPb.SyncAction_Move{
+					Move: &worldPb.MoveObject{
+						Uuid: &uuid,
+					},
+				},
+			},
+		},
+		// "test_simple": {
+		// 	&worldPb.Response{
+		// 		Code:    100,
+		// 		Message: "ok",
+		// 	},
+		// },
+	}
+	var unMarshalled worldPb.SyncAction
+	for name, table := range unmarshalTables {
+		t.Run(name, func(t *testing.T) {
+			pb, ok := table.expected.(proto.Message)
+			if !ok {
+				panic("pb convert error")
+			}
+			marshaller := jsonpb.Marshaler{}
+			marshalled, err := marshaller.MarshalToString(pb)
+			assert.Equal(t, nil, err)
+			err = jsonpb.UnmarshalString(marshalled, &unMarshalled)
+			assert.Equal(t, nil, err)
+			assert.Equal(t, table.expected, &unMarshalled)
 		})
 	}
 }
