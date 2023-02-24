@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package cluster_proto;
+option go_package = "../proto";
+
+message Vector3 {
+    optional int64 x = 1;
+    optional int64 y = 2;
+    optional int64 z = 3;
+}
+
+message Quaternion {
+    optional int64 x = 1;
+    optional int64 y = 2;
+    optional int64 z = 3;
+    optional int64 w = 4;
+}
+
+message PlayerJoin {
+    string uuid = 1; // 玩家UUID
+}
+
+message PlayerQuit {
+    string uuid = 1; // 玩家UUID
+}
+
+message SpwanObject {
+    optional string uuid = 1; // 对象ID
+    optional Vector3 position = 2; // 对象位置
+    optional Quaternion rotation = 3; // 对象旋转
+    optional Vector3 scale = 4; // 对象比例
+}
+
+message MoveObject {
+    optional string uuid = 1;
+    optional Vector3 position = 2;
+    optional Quaternion rotation = 3;
+    optional Vector3 scale = 4;
+}
+
+message DestroyObject {
+    optional string uuid = 1;
+}
+
+message HideObject {
+    optional string uuid = 1;
+}
+
+message PlayAnimation {
+    optional string uuid = 1;
+    optional string animation_uuid = 2;
+}
+
+message StopAnimation {
+    optional string uuid = 1;
+    optional string animation_uuid = 2;
+}
+
+// 数据帧类型美剧
+enum ActionType {
+    SPWAN = 0;
+    MOVE = 1;
+    Destroy = 2;
+    Hide = 3;
+    PLAY_ANIMATION = 4;
+    STOP_ANIMATION = 5;
+}
+
+// 同步数据帧请求
+message SyncAction {
+    string uuid = 1; // 同步请求的UUID
+    ActionType type = 2; // 同步请求的类型
+    optional double created_at = 3; // 同步请求创建的时间，单位毫秒
+    optional string creator_id = 4; // 同步请求创建者的ID
+
+    oneof payload {
+        SpwanObject spwan = 5;
+        MoveObject move = 6;
+        DestroyObject destory = 7;
+        HideObject hide = 8;
+        PlayAnimation play_anim = 9;
+        StopAnimation stop_anim = 10;
+    }
+}
+
+// 数据帧同步反馈
+message ActionCommitted {
+    optional double committed_at = 1; // 状态已同步的时间，单位毫秒
+    optional string sync_action_uuid = 2; // 同步请求的UUID
+    optional string creator_id = 3; // 被同步者的ID
+}
+
+message Response {
+    int32 code = 1;
+    string message = 2;
+}
+
+message RawMessage {
+    optional bytes data = 1;
+}

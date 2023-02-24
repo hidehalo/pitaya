@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/topfreegames/pitaya/v2"
@@ -18,7 +19,7 @@ type (
 		component.Base
 		timer *timer.Timer
 		app   pitaya.Pitaya
-		Stats *protos.Stats
+		Stats *Stats
 	}
 
 	// UserMessage represents a message that user sent
@@ -62,11 +63,23 @@ type (
 	}
 )
 
+// Outbound gets the outbound status
+func (Stats *Stats) Outbound(ctx context.Context, in []byte) ([]byte, error) {
+	Stats.outboundBytes += len(in)
+	return in, nil
+}
+
+// Inbound gets the inbound status
+func (Stats *Stats) Inbound(ctx context.Context, in []byte) ([]byte, error) {
+	Stats.inboundBytes += len(in)
+	return in, nil
+}
+
 // NewRoom returns a new room
 func NewRoom(app pitaya.Pitaya) *Room {
 	return &Room{
 		app:   app,
-		Stats: &protos.Stats{},
+		Stats: &Stats{},
 	}
 }
 
@@ -80,8 +93,8 @@ func (r *Room) AfterInit() {
 	r.timer = pitaya.NewTimer(time.Minute, func() {
 		count, err := r.app.GroupCountMembers(context.Background(), "room")
 		println("UserCount: Time=>", time.Now().String(), "Count=>", count, "Error=>", err)
-		println("OutboundBytes", r.Stats.OutboundBytes)
-		println("InboundBytes", r.Stats.OutboundBytes)
+		println("OutboundBytes", r.Stats.inboundBytes)
+		println("InboundBytes", r.Stats.outboundBytes)
 	})
 }
 
@@ -128,6 +141,8 @@ func (r *Room) SetSessionData(ctx context.Context, data *SessionData) ([]byte, e
 func (r *Room) Join(ctx context.Context) (*protos.JoinResponse, error) {
 	logger := pitaya.GetDefaultLoggerFromCtx(ctx)
 	s := r.app.GetSessionFromCtx(ctx)
+	fakeUID := s.ID()
+	s.Bind(ctx, strconv.Itoa(int(fakeUID))) // binding session uid
 	err := r.app.GroupAddMember(ctx, "room", s.UID())
 	if err != nil {
 		logger.Error("Failed to join room")
@@ -140,11 +155,21 @@ func (r *Room) Join(ctx context.Context) (*protos.JoinResponse, error) {
 		logger.Error(err)
 		return nil, err
 	}
-	s.Push("onMembers", &protos.AllMembers{Members: members})
+	allMemMsg := protos.AllMembers{Members: members}
+	err = s.Push("onMembers", &allMemMsg)
+	if err != nil {
+		r.Stats.Outbound(ctx, []byte(allMemMsg.String()))
+	}
 	err = r.app.GroupBroadcast(ctx, "connector", "room", "onNewUser", &protos.NewUser{Content: fmt.Sprintf("New user: %d", s.ID())})
 	if err != nil {
 		logger.Error("Failed to broadcast onNewUser")
 		logger.Error(err)
+		return nil, err
+	}
+	err = s.OnClose(func() {
+		r.app.GroupRemoveMember(ctx, "room", s.UID())
+	})
+	if err != nil {
 		return nil, err
 	}
 	return &protos.JoinResponse{Result: "success"}, nil
@@ -158,6 +183,21 @@ func (r *Room) Message(ctx context.Context, msg *protos.UserMessage) {
 		logger.Error("Error broadcasting message")
 		logger.Error(err)
 	}
+	count, err := r.app.GroupCountMembers(context.Background(), "room")
+	if err != nil {
+		logger.Error("Error counting bound")
+		logger.Error(err)
+	}
+	boundBytes := []byte(msg.String())
+	r.Stats.Inbound(ctx, boundBytes)
+	for i := 0; i < count; i++ {
+		r.Stats.Outbound(ctx, boundBytes)
+	}
+}
+
+func (r *Room) Docs(ctx context.Context) (*protos.JoinResponse, error) {
+	docs, _ := r.app.Documentation(true)
+	return &protos.JoinResponse{Result: fmt.Sprintf("%v", docs)}, nil
 }
 
 // SendRPC sends rpc
@@ -174,6 +214,6 @@ func (r *Room) SendRPC(ctx context.Context, msg *protos.SendRPCMsg) (*protos.RPC
 }
 
 // MessageRemote just echoes the given message
-func (r *Room) MessageRemote(ctx context.Context, msg *protos.UserMessage, b bool, s string) (*protos.UserMessage, error) {
+func (r *Room) MessageRemote(ctx context.Context, msg *protos.UserMessage) (*protos.UserMessage, error) {
 	return msg, nil
 }

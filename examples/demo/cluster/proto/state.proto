@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package cluster_proto;
+option go_package = "../proto";
+
+message Vector3 {
+    optional int64 x = 1;
+    optional int64 y = 2;
+    optional int64 z = 3;
+}
+
+message Quaternion {
+    optional int64 x = 1;
+    optional int64 y = 2;
+    optional int64 z = 3;
+    optional int64 w = 4;
+}
+
+message EntityStatus {
+    optional Vector3 position = 1;
+    optional Vector3 rotation = 2;
+    optional Vector3 scale = 3;
+}
+
+message Input {
+    string op = 1;
+}
+
+// State(n) + Input(n) = State(n+1)
+message UpdateEntityRequest {
+    EntityStatus status = 1;
+    optional Input input = 2;
+    optional EntityStatus prediction = 3;
+    double client_mts = 4;
+    uint64 client_tick = 5;
+    double server_mts = 6;
+    uint64 server_tick = 7;
+}
+
+message UpdateEntityResponse {
+    EntityStatus status = 1;
+    optional EntityStatus reconciliation = 2;
+    double client_mts = 3;
+    uint64 client_tick = 4;
+    double server_mts = 5;
+    uint64 server_tick = 6;
+}

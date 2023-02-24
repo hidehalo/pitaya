@@ -31,12 +31,16 @@
                 messages: []
             },
             created() {
-                starx.init({ host: window.location.hostname, port: 3250, path: '/' }, () => {
+                starx.init({ host: window.location.hostname, port: Number(window.location.port)-8090+3250, path: '/' }, () => {
                     console.log("initialized");
                     starx.on("onNewUser", this.onNewUser);
                     starx.on("onMembers", this.onMembers);
                     starx.on('onMessage', this.onMessage);
+                    starx.on('SyncAction', (msg) => console.debug(msg));
+                    starx.on('NewPlayer', (msg) => console.debug(msg));
+                    starx.on('PlayerQuit', (msg) => console.debug(msg));
                     starx.request("room.room.join", {}, this.join);
+                    starx.request("room.world.join", {}, this.join);
                 })
             },
             methods: {

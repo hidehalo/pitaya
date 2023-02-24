@@ -2,19 +2,22 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
+	"github.com/spf13/viper"
 	"github.com/topfreegames/pitaya/v2"
 	"github.com/topfreegames/pitaya/v2/acceptor"
 	"github.com/topfreegames/pitaya/v2/cluster"
 	"github.com/topfreegames/pitaya/v2/component"
 	"github.com/topfreegames/pitaya/v2/config"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services"
+	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/world"
 	"github.com/topfreegames/pitaya/v2/groups"
 	"github.com/topfreegames/pitaya/v2/route"
+	"github.com/topfreegames/pitaya/v2/serialize/jsonpb"
 )
 
 var app pitaya.Pitaya
@@ -26,13 +29,18 @@ func configureBackend() {
 		component.WithNameFunc(strings.ToLower),
 	)
 
+	app.Register(world.NewWorld(app),
+		component.WithName("world"),
+		component.WithNameFunc(strings.ToLower),
+	)
+
 	app.RegisterRemote(room,
 		component.WithName("room"),
 		component.WithNameFunc(strings.ToLower),
 	)
 }
 
-func configureFrontend(port int) {
+func configureFrontend() {
 	app.Register(services.NewConnector(app),
 		component.WithName("connector"),
 		component.WithNameFunc(strings.ToLower),
@@ -51,6 +59,7 @@ func configureFrontend(port int) {
 	) (*cluster.Server, error) {
 		// will return the first server
 		for k := range servers {
+			fmt.Println("server", k)
 			return servers[k], nil
 		}
 		return nil, nil
@@ -74,32 +83,63 @@ func configureFrontend(port int) {
 }
 
 func main() {
-	port := flag.Int("port", 3250, "the port to listen")
-	svType := flag.String("type", "connector", "the server type")
-	isFrontend := flag.Bool("frontend", true, "if server is frontend")
-
-	flag.Parse()
-
-	builder := pitaya.NewDefaultBuilder(*isFrontend, *svType, pitaya.Cluster, map[string]string{}, *config.NewDefaultBuilderConfig())
-	if *isFrontend {
-		tcp := acceptor.NewTCPAcceptor(fmt.Sprintf(":%d", *port))
-		builder.AddAcceptor(acceptor.NewWSAcceptor(":3250"))
-		builder.AddAcceptor(tcp)
+	var err error
+	cfg := viper.New()
+	cfg.AddConfigPath(".")
+	cfg.SetConfigName("config")
+	cfg.SetConfigType("toml")
+	err = cfg.ReadInConfig()
+	if err != nil {
+		panic(err)
 	}
-	builder.Groups = groups.NewMemoryGroupService(*config.NewDefaultMemoryGroupConfig())
+	serverConfig := config.NewConfig(cfg)
+	isCluster := serverConfig.GetBool("pitaya.cluster.enabled")
+	var svMode pitaya.ServerMode
+	if isCluster {
+		svMode = pitaya.Cluster
+	} else {
+		svMode = pitaya.Standalone
+	}
+	svType := serverConfig.GetString("pitaya.cluster.node.type")
+	var isFrontend bool
+	listens := make([]map[string]interface{}, 0)
+	err = serverConfig.UnmarshalKey("pitaya.conn.listens", &listens)
+	if err != nil {
+		panic(err)
+	}
+	if len(listens) > 0 {
+		isFrontend = true
+	}
+	builder := pitaya.NewBuilderWithConfigs(isFrontend, svType, svMode, map[string]string{}, serverConfig)
+	for _, listen := range listens {
+		if scheme, ok := listen["scheme"]; ok {
+			if port, ok := listen["port"]; ok {
+				fmt.Println("listen", scheme, port)
+				if scheme == "tcp" {
+					builder.AddAcceptor(acceptor.NewTCPAcceptor(fmt.Sprintf(":%d", port)))
+				} else if scheme == "ws" {
+					builder.AddAcceptor(acceptor.NewWSAcceptor(fmt.Sprintf(":%d", port)))
+				}
+			}
+		}
+	}
+	// builder.Groups = groups.NewMemoryGroupService(*config.NewDefaultMemoryGroupConfig())
+	etcdGrpConf := config.NewEtcdGroupServiceConfig(serverConfig)
+	builder.Groups, err = groups.NewEtcdGroupService(*etcdGrpConf, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// builder.Serializer = protobuf.NewSerializer()
+	builder.Serializer = jsonpb.NewSerializer()
 	app = builder.Build()
-
-	//TODO: Oelze pitaya.SetSerializer(protobuf.NewSerializer())
+	if !isFrontend {
+		configureBackend()
+	} else {
+		configureFrontend()
+		http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
+		go http.ListenAndServe(fmt.Sprintf(":%d", serverConfig.GetInt("app.chat.web.port")), nil)
+	}
 
 	defer app.Shutdown()
-
-	if !*isFrontend {
-		configureBackend()
-		http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
-		go http.ListenAndServe(":8080", nil)
-	} else {
-		configureFrontend(*port)
-	}
-
 	app.Start()
 }
