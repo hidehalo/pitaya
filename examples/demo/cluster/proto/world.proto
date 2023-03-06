@@ -4,16 +4,16 @@ package cluster_proto;
 option go_package = "../proto";
 
 message Vector3 {
-    optional int64 x = 1;
-    optional int64 y = 2;
-    optional int64 z = 3;
+    optional double x = 1;
+    optional double y = 2;
+    optional double z = 3;
 }
 
 message Quaternion {
-    optional int64 x = 1;
-    optional int64 y = 2;
-    optional int64 z = 3;
-    optional int64 w = 4;
+    optional double x = 1;
+    optional double y = 2;
+    optional double z = 3;
+    optional double w = 4;
 }
 
 message PlayerJoin {
@@ -59,7 +59,7 @@ message StopAnimation {
 // 数据帧类型美剧
 enum ActionType {
     SPWAN = 0;
-    MOVE = 1;
+    _MOVE = 1;
     Destroy = 2;
     Hide = 3;
     PLAY_ANIMATION = 4;
@@ -97,4 +97,85 @@ message Response {
 
 message RawMessage {
     optional bytes data = 1;
+}
+
+message FrameTick {
+    uint64 tick = 1;
+    double mts = 2;
+    repeated EntityStatus status = 3;
+}
+
+message EntityStatus {
+    string id = 1;
+    optional uint64 tick = 2;
+    optional double client_mts = 3;
+    optional Vector3 position = 4;
+    optional Vector3 rotation = 5;
+    optional Vector3 scale = 6;
+}
+
+// State(n) + Input(n) = State(n+1)
+message MoveRequest {
+    string id = 1;
+    EntityStatus delta = 2;
+    optional EntityStatus prediction = 3;
+    double client_mts = 4;
+    uint64 client_tick = 5;
+}
+
+message MoveResponse {
+    EntityStatus result = 1;
+    double client_mts = 2;
+    uint64 client_tick = 3;
+    string id = 4;
+}
+
+enum SimulateRPCMethod {
+    MOVE = 0;
+}
+
+message RawMessageGroup {
+    repeated bytes raw_data = 1;
+}
+
+message SimulateRPCRequest {
+    string method = 1;
+    uint64 client_tick = 2;
+    double client_mts = 3;
+    repeated bytes raw_args = 4;
+}
+
+enum SimulateRPCTicketCode {
+    OK = 0;
+    FAILED = 1;
+}
+
+message SimulateRPCTicket {
+    uint32 code = 1;
+    optional string request_id = 2;
+}
+
+message SimulateRPCResponse {
+    string request_id = 1;
+    uint32 code = 2;
+    uint64 client_tick = 3;
+    double client_mts = 4;
+    optional bytes raw_result = 5;
+}
+
+message SimulateForwardRequest {
+    repeated EntityStatus entities = 1;
+}
+
+message SimulateForwardResponse {
+    repeated EntityStatus entities = 1;
+}
+
+message RTT {
+    double start_mts = 1;
+}
+
+message RTTACK {
+    double start_mts = 1;
+    double received_mts = 2;
 }

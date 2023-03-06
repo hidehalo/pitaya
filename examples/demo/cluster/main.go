@@ -6,7 +6,9 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
+	redis "github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
 	"github.com/topfreegames/pitaya/v2"
 	"github.com/topfreegames/pitaya/v2/acceptor"
@@ -14,6 +16,8 @@ import (
 	"github.com/topfreegames/pitaya/v2/component"
 	"github.com/topfreegames/pitaya/v2/config"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services"
+	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/simulate"
+	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/storage"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/world"
 	"github.com/topfreegames/pitaya/v2/groups"
 	"github.com/topfreegames/pitaya/v2/route"
@@ -23,21 +27,33 @@ import (
 var app pitaya.Pitaya
 
 func configureBackend() {
-	room := services.NewRoom(app)
-	app.Register(room,
-		component.WithName("room"),
-		component.WithNameFunc(strings.ToLower),
-	)
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", // use default Addr
+		Password: "",               // no password set
+		DB:       0,                // use default DB
+	})
 
-	app.Register(world.NewWorld(app),
+	// room := services.NewRoom(app)
+	// app.Register(room,
+	// 	component.WithName("room"),
+	// 	component.WithNameFunc(strings.ToLower),
+	// )
+
+	app.Register(world.NewWorld(app, storage.NewRedisStreamManager(redisClient), redisClient),
 		component.WithName("world"),
 		component.WithNameFunc(strings.ToLower),
 	)
 
-	app.RegisterRemote(room,
-		component.WithName("room"),
+	simulator := simulate.NewSimulateComponent(storage.NewRedisStreamManager(redisClient), app, redisClient)
+	app.Register(simulator,
+		component.WithName("simulator"),
 		component.WithNameFunc(strings.ToLower),
 	)
+
+	// app.RegisterRemote(room,
+	// 	component.WithName("room"),
+	// 	component.WithNameFunc(strings.ToLower),
+	// )
 }
 
 func configureFrontend() {
@@ -59,7 +75,6 @@ func configureFrontend() {
 	) (*cluster.Server, error) {
 		// will return the first server
 		for k := range servers {
-			fmt.Println("server", k)
 			return servers[k], nil
 		}
 		return nil, nil
@@ -139,7 +154,7 @@ func main() {
 		http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
 		go http.ListenAndServe(fmt.Sprintf(":%d", serverConfig.GetInt("app.chat.web.port")), nil)
 	}
-
+	pitaya.SetTimerPrecision(5 * time.Millisecond)
 	defer app.Shutdown()
 	app.Start()
 }

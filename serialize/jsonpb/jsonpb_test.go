@@ -3,6 +3,7 @@ package jsonpb
 import (
 	"flag"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
@@ -52,4 +53,22 @@ func TestGoogleProtoBuffer(t *testing.T) {
 			assert.Equal(t, table.expected, &unMarshalled)
 		})
 	}
+}
+
+func TestNested(t *testing.T) {
+	marshaller := jsonpb.Marshaler{}
+	pb := &worldPb.SimulateRPCRequest{
+		Method:     worldPb.SimulateRPCMethod_name[int32(worldPb.SimulateRPCMethod_MOVE)],
+		ClientTick: 1,
+		ClientMts:  float64(time.Now().UnixMicro()),
+		RawArgs: [][]byte{
+			[]byte(`{"position":{"x":84,"y":426,"z":0}}`),
+		},
+	}
+	marshalled, err := marshaller.MarshalToString(pb)
+	assert.Equal(t, nil, err)
+	upb := &worldPb.SimulateRPCRequest{}
+	err = jsonpb.UnmarshalString(marshalled, upb)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, pb, upb)
 }
