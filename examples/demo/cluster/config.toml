@@ -1,13 +1,13 @@
 # ServiceDiscovery
 # Whether service as cluster
-pitaya.cluster.enabled = true
+pitaya.cluster.enabled = false
 # Role type of cluster server node
-# pitaya.cluster.node.type = "connector"
-pitaya.cluster.node.type = "room"
+pitaya.cluster.node.type = "connector"
+# pitaya.cluster.node.type = "room"
 # Dial timeout value passed to the service discovery etcd client
 pitaya.cluster.sd.etcd.dialtimeout = 5000000000
 # List of comma separated etcd endpoints
-pitaya.cluster.sd.etcd.endpoints = "172.16.1.28:2379"
+pitaya.cluster.sd.etcd.endpoints = "127.0.0.1:2379"
 # Username to connect to etcd
 pitaya.cluster.sd.etcd.user = ""
 # Password to connect to etcd
@@ -47,7 +47,7 @@ pitaya.cluster.rpc.client.grpc.lazyconnection = false
 # Request timeout for RPC calls with the gRPC client
 pitaya.cluster.rpc.client.grpc.requesttimeout = 5000000000
 # Nats address for the client
-pitaya.cluster.rpc.client.nats.connect = "nats://172.16.1.28:4222"
+pitaya.cluster.rpc.client.nats.connect = "nats://127.0.0.1:4222"
 # Timeout for the nats client to establish the connection
 pitaya.cluster.rpc.client.nats.connectiontimeout = 5000000000
 # Request timeout for RPC calls with the nats client
@@ -55,7 +55,7 @@ pitaya.cluster.rpc.client.nats.requesttimeout = 5000000000
 # Maximum number of retries to reconnect to nats for the client
 pitaya.cluster.rpc.client.nats.maxreconnectionretries = 15000000000
 # Nats address for the server
-pitaya.cluster.rpc.server.nats.connect = "nats://172.16.1.28:4222"
+pitaya.cluster.rpc.server.nats.connect = "nats://127.0.0.1:4222"
 # Timeout for the nats server to establish the connection
 pitaya.cluster.rpc.server.nats.connectiontimeout = 5000000000
 # Maximum number of retries to reconnect to nats for the server
@@ -99,10 +99,10 @@ pitaya.conn.ratelimiting.limit = 20
 # If true, ignores rate limiting even when added with WithWrappers
 pitaya.conn.ratelimiting.forcedisable = false
 # Network listening
-# pitaya.conn.listens = [
-#     { scheme = "ws", port = 3251},
-#     { scheme = "tcp", port = 4001}
-# ]
+pitaya.conn.listens = [
+    { scheme = "ws", port = 3250},
+    { scheme = "tcp", port = 4000}
+]
 # MetricsReporting
 # Whether statsd reporting should be enabled
 pitaya.metrics.statsd.enabled = false
@@ -143,7 +143,7 @@ pitaya.concurrency.handler.dispatch = 25
 # Whether Pitaya should enforce unique sessions for the clients, enabling the unique sessions module
 pitaya.session.unique = true
 # Comma separated list of etcd endpoints to be used by the binding storage module, should be the same as the service discovery etcd
-pitaya.modules.bindingstorage.etcd.endpoints = "172.16.1.28:2379"
+pitaya.modules.bindingstorage.etcd.endpoints = "127.0.0.1:2379"
 # Prefix used for etcd, should be the same as the service discovery
 pitaya.modules.bindingstorage.etcd.prefix = "pitaya/"
 # Timeout to establish the etcd connection
@@ -157,7 +157,7 @@ pitaya.defaultpipelines.structvalidation.enabled = false
 
 # Groups
 # Comma separated list of etcd endpoints to be used by the groups etcd service
-pitaya.groups.etcd.endpoints = "172.16.1.28:2379"
+pitaya.groups.etcd.endpoints = "127.0.0.1:2379"
 # Prefix used for every group key in etcd
 pitaya.groups.etcd.prefix = "pitaya/"
 # Timeout to establish the etcd group connection

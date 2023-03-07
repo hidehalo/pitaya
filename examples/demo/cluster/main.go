@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"strings"
 	"time"
 
@@ -97,6 +96,25 @@ func configureFrontend() {
 	}
 }
 
+func configureStandalone() {
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", // use default Addr
+		Password: "",               // no password set
+		DB:       0,                // use default DB
+	})
+
+	app.Register(world.NewWorld(app, storage.NewRedisStreamManager(redisClient), redisClient),
+		component.WithName("world"),
+		component.WithNameFunc(strings.ToLower),
+	)
+
+	simulator := simulate.NewSimulateComponent(storage.NewRedisStreamManager(redisClient), app, redisClient)
+	app.Register(simulator,
+		component.WithName("simulator"),
+		component.WithNameFunc(strings.ToLower),
+	)
+}
+
 func main() {
 	var err error
 	cfg := viper.New()
@@ -138,22 +156,31 @@ func main() {
 			}
 		}
 	}
-	// builder.Groups = groups.NewMemoryGroupService(*config.NewDefaultMemoryGroupConfig())
-	etcdGrpConf := config.NewEtcdGroupServiceConfig(serverConfig)
-	builder.Groups, err = groups.NewEtcdGroupService(*etcdGrpConf, nil)
-	if err != nil {
-		log.Fatal(err)
+	if isCluster {
+		etcdGrpConf := config.NewEtcdGroupServiceConfig(serverConfig)
+		builder.Groups, err = groups.NewEtcdGroupService(*etcdGrpConf, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		builder.Groups = groups.NewMemoryGroupService(*config.NewDefaultMemoryGroupConfig())
 	}
+
 	// builder.Serializer = protobuf.NewSerializer()
 	builder.Serializer = jsonpb.NewSerializer()
 	app = builder.Build()
-	if !isFrontend {
-		configureBackend()
+	if isCluster {
+		if !isFrontend {
+			configureBackend()
+		} else {
+			configureFrontend()
+			// http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
+			// go http.ListenAndServe(fmt.Sprintf(":%d", serverConfig.GetInt("app.chat.web.port")), nil)
+		}
 	} else {
-		configureFrontend()
-		http.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
-		go http.ListenAndServe(fmt.Sprintf(":%d", serverConfig.GetInt("app.chat.web.port")), nil)
+		configureStandalone()
 	}
+
 	pitaya.SetTimerPrecision(5 * time.Millisecond)
 	defer app.Shutdown()
 	app.Start()

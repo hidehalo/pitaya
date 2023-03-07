@@ -34,6 +34,7 @@ type World struct {
 	ticker    *timer.Timer
 	streamMgr storage.StreamManager
 	redis     *redis.Client
+	rttMap    map[string]time.Duration
 }
 
 func NewWorld(app pitaya.Pitaya, streamMgr storage.StreamManager, redis *redis.Client) *World {
@@ -257,13 +258,29 @@ func (w *World) syncLoop(ctx context.Context) {
 				}
 			}
 		}
-
-		w.app.GroupBroadcast(ctx, "connector", WorldRoom, "SyncStatus", unSyncStatus)
+		snapshot := &worldProto.Snapshot{
+			Rtt: &worldProto.RTT{
+				Id:       time.Now().String(),
+				StartMts: float64(time.Now().UnixMilli()) / 1000,
+			},
+			Entities: unSyncStatus,
+		}
+		w.app.GroupBroadcast(ctx, "connector", WorldRoom, "SyncSnapshot", snapshot)
 	})
 }
 
-func (w *World) rtt(ctx context.Context, rttAck *worldProto.RTTACK) float64 {
+func (w *World) Rtt(ctx context.Context, rtt *worldProto.RTT) (*worldProto.RTTACK, error) {
 	mtsNow := float64(time.Now().UnixMilli()) / 1000
-	rttMts := mtsNow - rttAck.StartMts
-	return rttMts
+	rttAck := &worldProto.RTTACK{
+		Id:          rtt.Id,
+		StartMts:    rtt.StartMts,
+		ReceivedMts: mtsNow,
+	}
+	return rttAck, nil
+}
+
+func (w *World) RttAck(ctx context.Context, rttAck *worldProto.RTTACK) {
+	session := w.app.GetSessionFromCtx(ctx)
+	mtsNow := float64(time.Now().UnixMilli()) / 1000
+	w.rttMap[session.UID()] = time.Duration(mtsNow - rttAck.StartMts)
 }

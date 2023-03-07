@@ -107,8 +107,6 @@ message FrameTick {
 
 message EntityStatus {
     string id = 1;
-    optional uint64 tick = 2;
-    optional double client_mts = 3;
     optional Vector3 position = 4;
     optional Vector3 rotation = 5;
     optional Vector3 scale = 6;
@@ -172,10 +170,17 @@ message SimulateForwardResponse {
 }
 
 message RTT {
-    double start_mts = 1;
+    string id = 1;
+    double start_mts = 2;
 }
 
 message RTTACK {
-    double start_mts = 1;
-    double received_mts = 2;
+    string id = 1;
+    double start_mts = 2;
+    double received_mts = 3;
+}
+
+message Snapshot {
+    RTT rtt = 1;
+    repeated EntityStatus entities  = 2;
 }
