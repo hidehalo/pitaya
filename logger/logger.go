@@ -32,7 +32,8 @@ var Log = initLogger()
 func initLogger() interfaces.Logger {
 	plog := logrus.New()
 	plog.Formatter = new(logrus.TextFormatter)
-	plog.Level = logrus.DebugLevel
+	// plog.Level = logrus.DebugLevel
+	plog.Level = logrus.InfoLevel
 
 	log := plog.WithFields(logrus.Fields{
 		"source": "pitaya",

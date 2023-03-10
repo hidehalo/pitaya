@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
+	"time"
 
 	redis "github.com/redis/go-redis/v9"
 	"github.com/topfreegames/pitaya/v2"
@@ -22,6 +24,8 @@ type SimulateComponent struct {
 	app       pitaya.Pitaya
 	s         serialize.Serializer
 	redis     *redis.Client
+	reqBuf    []*worldProto.EntityStatus
+	reqLock   sync.RWMutex
 }
 
 func NewSimulateComponent(streamMgr storage.StreamManager, app pitaya.Pitaya, redis *redis.Client) *SimulateComponent {
@@ -65,7 +69,7 @@ func (s *SimulateComponent) Call(ctx context.Context, msg *worldProto.SimulateRP
 			logger.Error(err)
 			return &worldProto.SimulateRPCTicket{Code: uint32(worldProto.SimulateRPCTicketCode_FAILED)}, nil
 		}
-		resultStreamId := fmt.Sprintf("%s:%s:%s", s.app.GetServer().Type, "simulator:result", moveStatus.Id)
+		resultStreamId := fmt.Sprintf("%s:%s:%s:%s", s.app.GetServer().Type, s.app.GetServer().ID, "simulator:result", moveStatus.Id)
 		resultStream := s.streamMgr.CreateStream(resultStreamId)
 		msgs, err := resultStream.Read(ctx, strconv.FormatUint(msg.ClientTick, 10), "status")
 		if err != nil {
@@ -99,7 +103,7 @@ func (s *SimulateComponent) Call(ctx context.Context, msg *worldProto.SimulateRP
 		resultValues := make(map[string]interface{})
 		resultValues["status"] = statusBytes
 		resultValues["tick"] = msg.ClientTick + 1
-		redisXMsg := &redis.XMessage{
+		redisXMsg := redis.XMessage{
 			ID:     strconv.FormatUint(msg.ClientTick+1, 10),
 			Values: resultValues,
 		}
@@ -115,7 +119,7 @@ func (s *SimulateComponent) Call(ctx context.Context, msg *worldProto.SimulateRP
 		values["status"] = statusBytes
 		values["tick"] = msg.ClientTick + 1
 		values["requestId"] = resultMsgId
-		redisXMsg = &redis.XMessage{
+		redisXMsg = redis.XMessage{
 			ID:     "*",
 			Values: values,
 		}
@@ -135,12 +139,13 @@ func (s *SimulateComponent) Forward(ctx context.Context, msg *worldProto.EntityS
 		logger.Error(err)
 		return nil, err
 	}
-	resultStreamId := fmt.Sprintf("%s:%s:%s", s.app.GetServer().Type, "simulator:result", msg.Id)
+	// resultStreamId := fmt.Sprintf("%s:%s:%s", s.app.GetServer().Type, "simulator:result", msg.Id)
+	resultStreamId := fmt.Sprintf("%s:%s:%s:%s", s.app.GetServer().Type, s.app.GetServer().ID, "simulator:result", msg.Id)
 	s.redis.SAdd(ctx, world.EntityStoreKey, msg.Id)
 	resultStream := s.streamMgr.CreateStream(resultStreamId)
 	resultValues := make(map[string]interface{})
 	resultValues["status"] = statusBytes
-	redisXMsg := &redis.XMessage{
+	redisXMsg := redis.XMessage{
 		ID:     "*",
 		Values: resultValues,
 	}
@@ -150,5 +155,32 @@ func (s *SimulateComponent) Forward(ctx context.Context, msg *worldProto.EntityS
 		logger.Error(err)
 		return nil, err
 	}
+	session := s.app.GetSessionFromCtx(ctx)
+	sessionData := session.GetData()
+	if groupName, ex := sessionData["group"]; ex && groupName.(string) != "" {
+		key := fmt.Sprintf("room:%s:laststatus:%s", s.app.GetServerID(), msg.GetId())
+		s.redis.Set(ctx, key, statusBytes, 30*time.Second)
+	}
+
 	return msg, nil
 }
+
+// func (s *SimulateComponent) Test(ctx context.Context) (*worldProto.EntityStatus, error) {
+// 	absFilePath, err := filepath.Abs("./resouces/Shall016.glb")
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	gltfDoc, err := gltf.ParseBin(absFilePath)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	gltfDoc.Accessors
+// 	gltfDoc.Animations
+// 	gltfDoc.Asset
+// 	gltfDoc.Cameras
+// 	gltfDoc.Scene
+// 	gltfDoc.
+// 	fmt.Println(gltfDoc)
+// 	return &worldProto.EntityStatus{Id: "1"}, nil
+// }

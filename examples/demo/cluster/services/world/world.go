@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	pbProto "github.com/golang/protobuf/proto"
@@ -12,9 +14,9 @@ import (
 	"github.com/topfreegames/pitaya/v2/component"
 	worldProto "github.com/topfreegames/pitaya/v2/examples/demo/cluster/proto"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/storage"
-	"github.com/topfreegames/pitaya/v2/examples/demo/protos"
+	"github.com/topfreegames/pitaya/v2/logger/interfaces"
+	"github.com/topfreegames/pitaya/v2/serialize"
 	"github.com/topfreegames/pitaya/v2/serialize/jsonpb"
-	"github.com/topfreegames/pitaya/v2/timer"
 )
 
 const (
@@ -28,71 +30,59 @@ const WorldRoom string = "world"
 
 const EntityStoreKey = "world:sync:entity:set"
 
+const FrontEndType = "room"
+
 type World struct {
 	component.Base
 	app       pitaya.Pitaya
-	ticker    *timer.Timer
+	ticker    *time.Ticker
 	streamMgr storage.StreamManager
 	redis     *redis.Client
 	rttMap    map[string]time.Duration
+	ctx       context.Context
+	cancel    context.CancelFunc
+	logger    interfaces.Logger
+	cg        map[string]bool
+	s         serialize.Serializer
 }
 
 func NewWorld(app pitaya.Pitaya, streamMgr storage.StreamManager, redis *redis.Client) *World {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &World{
 		app:       app,
 		streamMgr: streamMgr,
 		redis:     redis,
+		ctx:       ctx,
+		cancel:    cancel,
+		logger:    pitaya.GetDefaultLoggerFromCtx(ctx),
+		cg:        make(map[string]bool),
+		s:         jsonpb.NewSerializer(),
 	}
 }
 
 func (w *World) Init() {
-	w.app.GroupCreate(context.Background(), WorldRoom)
-	w.syncLoop(context.Background())
-	// tick := uint64(0)
-	// logger := pitaya.GetDefaultLoggerFromCtx(context.Background())
-	// s := jsonpb.NewSerializer()
-	// w.ticker = pitaya.NewTimer(33*time.Millisecond, func() {
-	// 	tick++
-	// 	memberCount, _ := w.app.GroupCountMembers(context.Background(), WorldRoom)
-	// 	if memberCount > 0 {
-	// 		frameTick := &worldProto.FrameTick{
-	// 			Tick: tick,
-	// 			Mts:  float64(time.Now().UnixMicro()) / 1000,
-	// 		}
-	// 		res := w.redis.SMembers(context.Background(), "world:sync:entity")
-	// 		if res.Err() != nil {
-	// 			logger.Error(res.Err())
-	// 		} else {
-	// 			for _, entityId := range res.Val() {
-	// 				resultStreamId := fmt.Sprintf("%s:%s:%s", w.app.GetServer().Type, "simulator:result", entityId)
-	// 				resultStream := w.streamMgr.CreateStream(resultStreamId)
-	// 				consumerGroup := resultStream.CreateConsumerGroup(context.Background(), "gameLoop")
-	// 				consumer := consumerGroup.CreateConsumer(context.Background(), w.app.GetServerID())
-	// 				streamMsgs, err := consumer.Consume(context.Background(), 120)
-	// 				if err != nil {
-	// 					logger.Error(err)
-	// 				} else {
-	// 					for _, xMsg := range streamMsgs {
-	// 						statusBytes := xMsg.GetValue("status", nil)
-	// 						if statusBytes == nil {
-	// 							logger.Error(err)
-	// 							continue
-	// 						}
-	// 						entityStatus := &worldProto.EntityStatus{}
-	// 						err := s.Unmarshal(statusBytes.([]byte), entityStatus)
-	// 						if statusBytes == nil {
-	// 							logger.Error(err)
-	// 							continue
-	// 						}
-	// 						frameTick.Status = append(frameTick.Status, entityStatus)
-	// 					}
-	// 				}
-	// 			}
-	// 		}
+	var wg sync.WaitGroup
+	wg.Add(3)
 
-	// 		w.app.GroupBroadcast(context.Background(), "connector", WorldRoom, "FrameTick", frameTick)
-	// 	}
-	// })
+	go func() {
+		defer wg.Done()
+		rkRes := w.redis.Keys(w.ctx, "room:*")
+		w.redis.Del(w.ctx, rkRes.Val()...)
+	}()
+
+	go func() {
+		defer wg.Done()
+		wkRes := w.redis.Keys(w.ctx, "world:*")
+		w.redis.Del(w.ctx, wkRes.Val()...)
+	}()
+
+	go func() {
+		defer wg.Done()
+		w.app.GroupCreate(w.ctx, WorldRoom)
+	}()
+	wg.Wait()
+
+	go w.syncLoop(w.ctx)
 }
 
 func (w *World) AfterInit() {
@@ -100,17 +90,19 @@ func (w *World) AfterInit() {
 }
 
 func (w *World) BeforeShutdown() {
-}
-
-func (w *World) Shutdown() {
 	w.app.GroupDelete(context.Background(), WorldRoom)
 	if w.ticker != nil {
 		w.ticker.Stop()
 	}
+	w.cancel()
+}
+
+func (w *World) Shutdown() {
+
 }
 
 // Join world
-func (w *World) Join(ctx context.Context) (*worldProto.Response, error) {
+func (w *World) Join(ctx context.Context, initStatus *worldProto.EntityStatus) (*worldProto.Response, error) {
 	logger := pitaya.GetDefaultLoggerFromCtx(ctx)
 	s := w.app.GetSessionFromCtx(ctx)
 	fakeUID := s.ID()
@@ -121,22 +113,51 @@ func (w *World) Join(ctx context.Context) (*worldProto.Response, error) {
 		logger.Error(err)
 		return nil, err
 	}
+	s.SetData(map[string]interface{}{
+		"group": WorldRoom,
+	})
 	// onclose callbacks are not allowed on backend servers
-	// err = s.OnClose(func() {
-	// 	w.app.GroupRemoveMember(ctx, WorldRoom, s.UID())
-	// })
-	// if err != nil {
-	// 	return nil, err
-	// }
-	members, err := w.app.GroupMembers(ctx, WorldRoom)
+	s.OnClose(func() {
+		w.app.GroupRemoveMember(ctx, WorldRoom, s.UID())
+		s.SetData(map[string]interface{}{
+			"group": "",
+		})
+	})
+	logger.Infof("Joins %s state = %d", initStatus.GetId(), initStatus.GetState())
+	statusBytes, err := w.s.Marshal(initStatus)
 	if err != nil {
-		logger.Error("Failed to get members")
 		logger.Error(err)
 		return nil, err
 	}
-	allMemMsg := protos.AllMembers{Members: members}
-	err = s.Push("GroupMembers", &allMemMsg)
-	err = w.app.GroupBroadcast(ctx, "connector", WorldRoom, NewPlayer, &worldProto.PlayerJoin{Uuid: s.UID()})
+	key := fmt.Sprintf("room:%s:laststatus:%s", w.app.GetServerID(), initStatus.GetId())
+	setRes := w.redis.Set(ctx, key, statusBytes, 30*time.Second)
+	w.logger.Infof("Set key %s result=%s", key, setRes.Val())
+	setRes.Val()
+	if setRes.Err() != nil {
+		return nil, setRes.Err()
+	}
+	keyPattern := fmt.Sprintf("room:%s:laststatus:*", w.app.GetServerID())
+	keys := w.redis.Keys(w.ctx, keyPattern)
+	w.logger.Infof("keys result=%v, error=%v", keys.Val(), keys.Err())
+	statusSlice := make([]*worldProto.EntityStatus, 0)
+	// statusSlice = append(statusSlice, initStatus)
+	if len(keys.Val()) > 0 {
+		res := w.redis.MGet(w.ctx, keys.Val()...)
+		w.logger.Infof("mget result=%v, error=%v", res.Val(), res.Err())
+		for _, rawData := range res.Val() {
+			entityStatus := &worldProto.EntityStatus{}
+			err := w.s.Unmarshal([]byte(rawData.(string)), entityStatus)
+			if err != nil {
+				w.logger.Error("Unmarshal rawData error", err)
+				continue
+			}
+			statusSlice = append(statusSlice, entityStatus)
+		}
+	}
+	err = w.app.GroupBroadcast(ctx, FrontEndType, WorldRoom, NewPlayer, &worldProto.PlayerJoin{
+		Uuid:     s.UID(),
+		Entities: statusSlice,
+	})
 	if err != nil {
 		logger.Error("Failed to broadcast NewPlayer")
 		logger.Error(err)
@@ -154,24 +175,16 @@ func (w *World) Leave(ctx context.Context) (*worldProto.Response, error) {
 		logger.Error(err)
 		return nil, err
 	}
-	err = w.app.GroupBroadcast(ctx, "connector", WorldRoom, PlayerQuit, &worldProto.PlayerQuit{Uuid: s.UID()})
+	err = w.app.GroupBroadcast(ctx, FrontEndType, WorldRoom, PlayerQuit, &worldProto.PlayerQuit{Uuid: s.UID()})
 	if err != nil {
 		logger.Error("Failed to broadcast PlayerQuit")
 		logger.Error(err)
 		return nil, err
 	}
+	s.SetData(map[string]interface{}{
+		"group": "",
+	})
 	return &worldProto.Response{Code: 200, Message: "ok"}, nil
-}
-
-func (w *World) SyncAction(ctx context.Context, msg *worldProto.SyncAction) {
-	logger := pitaya.GetDefaultLoggerFromCtx(ctx)
-	serverTs := float64(time.Now().UnixNano()) / 1000
-	msg.CreatedAt = &serverTs
-	err := w.sendPushToOthers(ctx, SyncAction, msg)
-	if err != nil {
-		logger.Error("Error broadcasting SyncAction")
-		logger.Error(err)
-	}
 }
 
 func (w *World) sendPushToOthers(ctx context.Context, route string, msg pbProto.Message) error {
@@ -186,7 +199,7 @@ func (w *World) sendPushToOthers(ctx context.Context, route string, msg pbProto.
 			otherUids = append(otherUids, uid)
 		}
 	}
-	_, err = w.app.SendPushToUsers(route, msg, otherUids, "connector")
+	_, err = w.app.SendPushToUsers(route, msg, otherUids, FrontEndType)
 	if err != nil {
 		return err
 	}
@@ -221,56 +234,117 @@ func (w *World) delSyncEntity(entities ...*worldProto.EntityStatus) error {
 	return res.Err()
 }
 
-func (w *World) syncLoop(ctx context.Context) {
-	logger := pitaya.GetDefaultLoggerFromCtx(context.Background())
-	s := jsonpb.NewSerializer()
-	w.ticker = pitaya.NewTimer(time.Second/30, func() {
-		memberCount, _ := w.app.GroupCountMembers(context.Background(), WorldRoom)
-		if memberCount <= 0 {
-			return
-		}
+func (w *World) handleTick() {
+	memberCount, _ := w.app.GroupCountMembers(context.Background(), WorldRoom)
+	if memberCount <= 0 {
+		return
+	}
 
-		syncEntities := w.getSyncEntities()
-		unSyncStatus := make([]*worldProto.EntityStatus, 0)
+	streams := make([]string, 0)
+	syncEntities := w.getSyncEntities()
+	if len(syncEntities) == 0 {
+		return
+	}
 
-		for _, syncEntity := range syncEntities {
-			resultStreamId := fmt.Sprintf("%s:%s:%s", w.app.GetServer().Type, "simulator:result", syncEntity.Id)
-			resultStream := w.streamMgr.CreateStream(resultStreamId)
-			consumerGroup := resultStream.CreateConsumerGroup(context.Background(), "gameLoop")
-			consumer := consumerGroup.CreateConsumer(context.Background(), w.app.GetServerID())
-			streamMsgs, err := consumer.Consume(context.Background(), 120)
-			if err != nil {
-				logger.Error(err)
+	for _, syncEntity := range syncEntities {
+		// resultStreamId := fmt.Sprintf("%s:%s:%s:%s", w.app.GetServer().Type, w.app.GetServer().ID, "simulator:result", syncEntity.Id)
+		resultStreamId := fmt.Sprintf("%s:%s:%s:%s", w.app.GetServer().Type, w.app.GetServer().ID, "simulator:result", syncEntity.Id)
+		streams = append(streams, resultStreamId)
+
+		if _, ok := w.cg[resultStreamId]; !ok {
+			xcRes := w.redis.XGroupCreate(w.ctx, resultStreamId, "gameLoop", "0")
+			if xcRes.Err() == nil {
+				w.cg[resultStreamId] = true
+				w.logger.Infof("Redis Stream %s XGroupCreate success", resultStreamId)
 			} else {
-				for _, xMsg := range streamMsgs {
-					statusBytes := xMsg.GetValue("status", nil)
-					if statusBytes == nil {
-						logger.Error(err)
-						continue
-					}
-					entityStatus := &worldProto.EntityStatus{}
-					err := s.Unmarshal(statusBytes.([]byte), entityStatus)
-					if statusBytes == nil {
-						logger.Error(err)
-						continue
-					}
-					unSyncStatus = append(unSyncStatus, entityStatus)
-				}
+				w.logger.Warnf("Redis Stream %s XGroupCreate error %s", resultStreamId, xcRes.Err().Error())
 			}
 		}
+	}
+
+	suffix := strings.Split(strings.Repeat(">", len(streams)), "")
+	streams = append(streams, suffix...)
+	unSyncStatus := make([]*worldProto.EntityStatus, 0)
+	res := w.redis.XReadGroup(w.ctx, &redis.XReadGroupArgs{
+		Group:    "gameLoop",
+		Consumer: w.app.GetServerID(),
+		Streams:  streams,
+		Count:    120,
+		Block:    -1,
+		NoAck:    true,
+	})
+	if res.Err() != nil && res.Err() != redis.Nil {
+		w.logger.Errorf("Redis XReadGroup streams %v failed, error is %s", streams, res.Err().Error())
+	}
+
+	for _, xStm := range res.Val() {
+		for _, xMsg := range xStm.Messages {
+			statusBytes := xMsg.Values["status"]
+			if statusBytes == nil {
+				w.logger.Error("Read statusBytes")
+				continue
+			}
+			entityStatus := &worldProto.EntityStatus{}
+			err := w.s.Unmarshal([]byte(statusBytes.(string)), entityStatus)
+			if statusBytes == nil {
+				w.logger.Error("Unmarshal statusBytes", err)
+				continue
+			}
+			unSyncStatus = append(unSyncStatus, entityStatus)
+		}
+	}
+
+	if len(unSyncStatus) > 0 {
 		snapshot := &worldProto.Snapshot{
 			Rtt: &worldProto.RTT{
 				Id:       time.Now().String(),
-				StartMts: float64(time.Now().UnixMilli()) / 1000,
+				StartMts: float64(time.Now().UnixMicro()) / 1000,
 			},
 			Entities: unSyncStatus,
 		}
-		w.app.GroupBroadcast(ctx, "connector", WorldRoom, "SyncSnapshot", snapshot)
-	})
+		// logger.Infof("Broadcast snapshots length=%d", len(snapshot.Entities))
+		w.app.GroupBroadcast(w.ctx, FrontEndType, WorldRoom, "SyncSnapshot", snapshot)
+	}
+}
+
+func (w *World) syncLoop(ctx context.Context) {
+	// maxConcurrency := runtime.NumCPU() * 2
+	maxConcurrency := 1
+	w.logger.Infof("Tick handler count=%d", maxConcurrency)
+	tickCh := make(chan int, maxConcurrency)
+	var wg sync.WaitGroup
+	for c := 0; c < maxConcurrency; c++ {
+		go func(ctx context.Context) {
+			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tickCh:
+					w.handleTick()
+				}
+			}
+		}(w.ctx)
+	}
+	wg.Add(maxConcurrency)
+	ticker := time.NewTicker(16 * time.Millisecond)
+	w.ticker = ticker
+
+Loop:
+	for {
+		select {
+		case <-ticker.C:
+			tickCh <- 1
+		case <-ctx.Done():
+			break Loop
+		}
+	}
+	wg.Wait()
+	close(tickCh)
 }
 
 func (w *World) Rtt(ctx context.Context, rtt *worldProto.RTT) (*worldProto.RTTACK, error) {
-	mtsNow := float64(time.Now().UnixMilli()) / 1000
+	mtsNow := float64(time.Now().UnixMicro()) / 1000
 	rttAck := &worldProto.RTTACK{
 		Id:          rtt.Id,
 		StartMts:    rtt.StartMts,
@@ -281,6 +355,6 @@ func (w *World) Rtt(ctx context.Context, rtt *worldProto.RTT) (*worldProto.RTTAC
 
 func (w *World) RttAck(ctx context.Context, rttAck *worldProto.RTTACK) {
 	session := w.app.GetSessionFromCtx(ctx)
-	mtsNow := float64(time.Now().UnixMilli()) / 1000
+	mtsNow := float64(time.Now().UnixMicro()) / 1000
 	w.rttMap[session.UID()] = time.Duration(mtsNow - rttAck.StartMts)
 }

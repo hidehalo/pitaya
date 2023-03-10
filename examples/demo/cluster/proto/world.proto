@@ -18,6 +18,7 @@ message Quaternion {
 
 message PlayerJoin {
     string uuid = 1; // 玩家UUID
+    repeated EntityStatus entities = 2;
 }
 
 message PlayerQuit {
@@ -107,9 +108,11 @@ message FrameTick {
 
 message EntityStatus {
     string id = 1;
+    optional double mts = 2;
     optional Vector3 position = 4;
     optional Vector3 rotation = 5;
     optional Vector3 scale = 6;
+    int32 state = 7;//0-idle, 1-walk, 2-run, 3-dance, 4-dribble
 }
 
 // State(n) + Input(n) = State(n+1)

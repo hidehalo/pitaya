@@ -8,7 +8,7 @@ import (
 )
 
 type RedisStreamMessage struct {
-	*redis.XMessage
+	redis.XMessage
 }
 
 func (m *RedisStreamMessage) GetID() string {
@@ -28,13 +28,14 @@ func (m *RedisStreamMessage) GetValues() map[string]interface{} {
 
 type MessageSlice []Message
 
-func (ms MessageSlice) createFromRedisStreamMessage(redisMsgs []redis.XMessage) {
-	if ms == nil {
-		ms = make(MessageSlice, 0)
-	}
+func createFromRedisStreamMessage(redisMsgs []redis.XMessage) MessageSlice {
+	ms := make(MessageSlice, 0)
 	for _, rawMsg := range redisMsgs {
-		ms = append(ms, &RedisStreamMessage{&rawMsg})
+		ms = append(ms, &RedisStreamMessage{
+			XMessage: rawMsg,
+		})
 	}
+	return ms
 }
 
 type RedisConsumer struct {
@@ -59,13 +60,19 @@ func (c *RedisConsumer) Consume(ctx context.Context, maxLen int64) ([]Message, e
 		Block:    -1,
 		Streams:  []string{c.GetGroup().GetStream().GetName(), ">"},
 		Count:    maxLen,
+		NoAck:    false,
 	})
 	if streams.Err() != nil && streams.Err() != redis.Nil {
 		return nil, streams.Err()
 	}
+	// if len(streams.Val()) > 0 {
+	// 	fmt.Println("consumer read stream message", len(streams.Val()[0].Messages))
+	// } else {
+	// 	fmt.Println("consume stream is not ex", c.GetGroup().GetStream().GetName())
+	// }
 	var messages MessageSlice
 	if len(streams.Val()) > 0 {
-		messages.createFromRedisStreamMessage(streams.Val()[0].Messages)
+		messages = createFromRedisStreamMessage(streams.Val()[0].Messages)
 	}
 	return messages, nil
 }
@@ -82,13 +89,13 @@ func (c *RedisConsumer) GetPending(ctx context.Context) ([]Message, error) {
 	}
 	var messages MessageSlice
 	if len(streams.Val()) > 0 {
-		messages.createFromRedisStreamMessage(streams.Val()[0].Messages)
+		messages = createFromRedisStreamMessage(streams.Val()[0].Messages)
 	}
 	return messages, nil
 }
 
 func (c *RedisConsumer) ACK(ctx context.Context, ids ...string) (int64, error) {
-	ack := c.client.XAck(ctx, c.GetGroup().GetStream().GetName(), c.GetName(), ids...)
+	ack := c.client.XAck(ctx, c.GetGroup().GetStream().GetName(), c.GetGroup().GetName(), ids...)
 	return ack.Val(), ack.Err()
 }
 
@@ -104,7 +111,7 @@ func (c *RedisConsumer) Claim(ctx context.Context, consumer string, nice int64, 
 		return nil, messages.Err()
 	}
 	var messageSlice MessageSlice
-	messageSlice.createFromRedisStreamMessage(messages.Val())
+	messageSlice = createFromRedisStreamMessage(messages.Val())
 	return messageSlice, nil
 }
 
@@ -176,21 +183,38 @@ func (s *RedisStream) CreateConsumerGroup(ctx context.Context, groupName string)
 		client:    s.client,
 	}
 	s.consumerGroups = append(s.consumerGroups, redisConsumerGroup)
-	groupInfosRes := s.client.XInfoGroups(ctx, s.GetName())
-	if groupInfosRes.Err() != nil {
-		panic(groupInfosRes.Err())
+	streamInfoRes := s.client.XInfoStream(context.Background(), s.GetName())
+	makeStream := false
+	// TODO: stream 不存在则要创建 stream
+	if streamInfoRes.Err() != nil && streamInfoRes.Err().Error() == "ERR no such key" {
+		makeStream = true
+	} else if streamInfoRes.Err() != nil {
+		panic("streamInfoRes Error: " + streamInfoRes.Err().Error())
 	}
+
 	remoteCreated := false
-	for _, groupInfo := range groupInfosRes.Val() {
-		if groupInfo.Name == groupName {
-			remoteCreated = true
-			break
+	if !makeStream {
+		groupInfosRes := s.client.XInfoGroups(ctx, s.GetName())
+		if groupInfosRes.Err() != nil {
+			panic("groupInfosRes Error" + groupInfosRes.Err().Error())
+		}
+		for _, groupInfo := range groupInfosRes.Val() {
+			if groupInfo.Name == groupName {
+				remoteCreated = true
+				break
+			}
 		}
 	}
+
 	if !remoteCreated {
-		res := s.client.XGroupCreate(ctx, s.GetName(), groupName, "0")
+		var res *redis.StatusCmd
+		if makeStream {
+			res = s.client.XGroupCreateMkStream(ctx, s.GetName(), groupName, "0")
+		} else {
+			res = s.client.XGroupCreate(ctx, s.GetName(), groupName, "0")
+		}
 		if res.Err() != nil {
-			panic(res.Err())
+			panic("Create stream consumer group error: " + res.Err().Error())
 		}
 	}
 	return redisConsumerGroup
@@ -225,7 +249,7 @@ func (s *RedisStream) Read(ctx context.Context, id string, keys ...string) ([]Me
 	}
 	var messageSlice MessageSlice
 	if len(streams.Val()) > 0 {
-		messageSlice.createFromRedisStreamMessage(streams.Val()[0].Messages)
+		messageSlice = createFromRedisStreamMessage(streams.Val()[0].Messages)
 	}
 	return messageSlice, nil
 }

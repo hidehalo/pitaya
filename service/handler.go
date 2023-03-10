@@ -24,9 +24,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/nats-io/nuid"
 	"strings"
 	"time"
+
+	"github.com/nats-io/nuid"
 
 	"github.com/topfreegames/pitaya/v2/acceptor"
 	"github.com/topfreegames/pitaya/v2/pipeline"
@@ -312,6 +313,7 @@ func (h *HandlerService) localProcess(ctx context.Context, a agent.Agent, route 
 	}
 
 	ret, err := h.handlerPool.ProcessHandlerMessage(ctx, route, h.serializer, h.handlerHooks, a.GetSession(), msg.Data, msg.Type, false)
+	logger.Log.Debugf("[Message ID=%d] [Message Type=%d]", mid, msg.Type)
 	if msg.Type != message.Notify {
 		if err != nil {
 			logger.Log.Errorf("Failed to process handler message: %s", err.Error())

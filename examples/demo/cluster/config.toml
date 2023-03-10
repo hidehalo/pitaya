@@ -2,8 +2,8 @@
 # Whether service as cluster
 pitaya.cluster.enabled = false
 # Role type of cluster server node
-pitaya.cluster.node.type = "connector"
-# pitaya.cluster.node.type = "room"
+# pitaya.cluster.node.type = "connector"
+pitaya.cluster.node.type = "room"
 # Dial timeout value passed to the service discovery etcd client
 pitaya.cluster.sd.etcd.dialtimeout = 5000000000
 # List of comma separated etcd endpoints

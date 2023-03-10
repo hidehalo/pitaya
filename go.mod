@@ -43,11 +43,15 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
+	github.com/g3n/engine v0.2.0 // indirect
 	github.com/garyburd/redigo v1.6.0 // indirect
+	github.com/gen2brain/raylib-go/raylib v0.0.0-20230307122709-61db589fe872 // indirect
+	github.com/go-gl/glfw/v3.3/glfw v0.0.0-20210410170116-ea3d685f79fb // indirect
 	github.com/go-playground/locales v0.13.0 // indirect
 	github.com/go-playground/universal-translator v0.17.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/btree v1.0.1 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
@@ -71,6 +75,9 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
+	github.com/qmuntal/draco-go v0.5.0 // indirect
+	github.com/qmuntal/draco-go/gltf/draco v0.1.0 // indirect
+	github.com/qmuntal/gltf v0.23.1 // indirect
 	github.com/redis/go-redis/v9 v9.0.2 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/afero v1.6.0 // indirect
@@ -98,6 +105,7 @@ require (
 	go.uber.org/multierr v1.7.0 // indirect
 	go.uber.org/zap v1.17.0 // indirect
 	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd // indirect
+	golang.org/x/image v0.0.0-20210607152325-775e3b0c77b9 // indirect
 	golang.org/x/sys v0.0.0-20220111092808-5a964db01320 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20211116232009-f0f3c7e86c11 // indirect
