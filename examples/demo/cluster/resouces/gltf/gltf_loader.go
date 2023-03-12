@@ -19,7 +19,6 @@ import (
 	gltfLoader "github.com/g3n/engine/loader/gltf"
 	"github.com/g3n/engine/material"
 	"github.com/g3n/engine/math32"
-	"github.com/ngaut/log"
 )
 
 var bufferCache map[int][]byte
@@ -196,7 +195,7 @@ func (g *GLTFLoader) loadAccessorBytes(ac gltfLoader.Accessor) ([]byte, error) {
 
 	// Get the Accessor's BufferView
 	if ac.BufferView == nil && ac.Sparse == nil {
-		return make([]byte, gltfLoader.TypeSizes[ac.Type]*ac.Count), nil
+		return make([]byte, ComponentBytesCount[ac.ComponentType]*gltfLoader.TypeSizes[ac.Type]*ac.Count), nil
 	}
 	// if ac.BufferView == nil {
 	// 	defaultIndex := 0
@@ -419,7 +418,6 @@ func (g *GLTFLoader) loadFileBytes(uri string) ([]byte, error) {
 
 // bytesToArrayU32 converts a byte array to ArrayU32.
 func (g *GLTFLoader) bytesToArrayU32(data []byte, componentType, count int) (math32.ArrayU32, error) {
-
 	// If component is UNSIGNED_INT nothing to do
 	if componentType == gltfLoader.UNSIGNED_INT {
 		arr := (*[1 << 30]uint32)(unsafe.Pointer(&data[0]))[:count]
@@ -478,7 +476,7 @@ func (g *GLTFLoader) bytesToArrayF32(data []byte, componentType, count int) (mat
 }
 
 // loadAttributes loads the provided list of vertex attributes as VBO(s) into the specified geometry.
-func (g *GLTF) loadAttributes(geom *geometry.Geometry, attributes map[string]int, indices math32.ArrayU32) error {
+func (g *GLTFLoader) loadAttributes(geom *geometry.Geometry, attributes map[string]int, indices math32.ArrayU32) error {
 
 	// Indices of buffer views
 	interleavedVBOs := make(map[int]*gls.VBO, 0)
@@ -512,7 +510,7 @@ func (g *GLTF) loadAttributes(geom *geometry.Geometry, attributes map[string]int
 				// TODO: BUG HERE
 				// If buffer view has accessors with different component type then this will have a read alignment problem!
 				//
-				data, err := g.bytesToArrayF32(buf, accessor.ComponentType, accessor.Count*TypeSizes[accessor.Type])
+				data, err := g.bytesToArrayF32(buf, accessor.ComponentType, accessor.Count*gltfLoader.TypeSizes[accessor.Type])
 				if err != nil {
 					return err
 				}
@@ -528,7 +526,7 @@ func (g *GLTF) loadAttributes(geom *geometry.Geometry, attributes map[string]int
 			if err != nil {
 				return err
 			}
-			data, err := g.bytesToArrayF32(buf, accessor.ComponentType, accessor.Count*TypeSizes[accessor.Type])
+			data, err := g.bytesToArrayF32(buf, accessor.ComponentType, accessor.Count*gltfLoader.TypeSizes[accessor.Type])
 			if err != nil {
 				return err
 			}
@@ -549,20 +547,19 @@ func (g *GLTF) loadAttributes(geom *geometry.Geometry, attributes map[string]int
 
 // LoadMesh creates and returns a Graphic Node (graphic.Mesh, graphic.Lines, graphic.Points, etc)
 // from the specified GLTF.Meshes index.
-func (g *GLTF) LoadMesh(meshIdx int) (core.INode, error) {
-
+func (g *GLTFLoader) LoadMesh(meshIdx int) (core.INode, error) {
 	// Check if provided mesh index is valid
 	if meshIdx < 0 || meshIdx >= len(g.Meshes) {
 		return nil, fmt.Errorf("invalid mesh index")
 	}
 	meshData := g.Meshes[meshIdx]
 	// Return cached if available
-	if meshData.cache != nil {
-		// TODO CLONE/REINSTANCE INSTEAD
-		//log.Debug("Instancing Mesh %d (from cached)", meshIdx)
-		//return meshData.cache, nil
-	}
-	log.Debug("Loading Mesh %d", meshIdx)
+	// if meshData.cache != nil {
+	// 	// TODO CLONE/REINSTANCE INSTEAD
+	// 	//log.Debug("Instancing Mesh %d (from cached)", meshIdx)
+	// 	//return meshData.cache, nil
+	// }
+	// log.Debug("Loading Mesh %d", meshIdx)
 
 	var err error
 
@@ -631,20 +628,20 @@ func (g *GLTF) LoadMesh(meshIdx int) (core.INode, error) {
 		}
 
 		// Default mode is 4 (TRIANGLES)
-		mode := TRIANGLES
+		mode := gltfLoader.TRIANGLES
 		if p.Mode != nil {
 			mode = *p.Mode
 		}
 
 		// Create Mesh
 		// TODO materials for LINES, etc need to be different...
-		if mode == TRIANGLES {
+		if mode == gltfLoader.TRIANGLES {
 			meshNode.GetNode().Add(graphic.NewMesh(igeom, grMat))
-		} else if mode == LINES {
+		} else if mode == gltfLoader.LINES {
 			meshNode.GetNode().Add(graphic.NewLines(igeom, grMat))
-		} else if mode == LINE_STRIP {
+		} else if mode == gltfLoader.LINE_STRIP {
 			meshNode.GetNode().Add(graphic.NewLineStrip(igeom, grMat))
-		} else if mode == POINTS {
+		} else if mode == gltfLoader.POINTS {
 			meshNode.GetNode().Add(graphic.NewPoints(igeom, grMat))
 		} else {
 			return nil, fmt.Errorf("unsupported primitive:%v", mode)
@@ -657,7 +654,211 @@ func (g *GLTF) LoadMesh(meshIdx int) (core.INode, error) {
 	}
 
 	// Cache mesh
-	g.Meshes[meshIdx].cache = meshNode
+	// g.Meshes[meshIdx].cache = meshNode
 
 	return meshNode, nil
+}
+
+// validateAccessorAttribute validates the specified accessor for the given attribute name.
+func (g *GLTFLoader) validateAccessorAttribute(ac gltfLoader.Accessor, attribName string) error {
+
+	parts := strings.Split(attribName, "_")
+	semantic := parts[0]
+
+	usage := "attribute " + attribName
+
+	if attribName == "POSITION" {
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC3}, []int{gltfLoader.FLOAT})
+	} else if attribName == "NORMAL" {
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC3}, []int{gltfLoader.FLOAT})
+	} else if attribName == "TANGENT" {
+		// Note that morph targets only support VEC3 whereas normal attributes only support VEC4.
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC3, gltfLoader.VEC4}, []int{gltfLoader.FLOAT})
+	} else if semantic == "TEXCOORD" {
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC2}, []int{gltfLoader.FLOAT, gltfLoader.UNSIGNED_BYTE, gltfLoader.UNSIGNED_SHORT})
+	} else if semantic == "COLOR" {
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC3, gltfLoader.VEC4}, []int{gltfLoader.FLOAT, gltfLoader.UNSIGNED_BYTE, gltfLoader.UNSIGNED_SHORT})
+	} else if semantic == "JOINTS" {
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC4}, []int{gltfLoader.UNSIGNED_BYTE, gltfLoader.UNSIGNED_SHORT})
+	} else if semantic == "WEIGHTS" {
+		return g.validateAccessor(ac, usage, []string{gltfLoader.VEC4}, []int{gltfLoader.FLOAT, gltfLoader.UNSIGNED_BYTE, gltfLoader.UNSIGNED_SHORT})
+	} else {
+		return fmt.Errorf("attribute %v is not supported", attribName)
+	}
+}
+
+// newDefaultMaterial creates and returns the default material.
+func (g *GLTFLoader) newDefaultMaterial() material.IMaterial {
+
+	return material.NewStandard(&math32.Color{0.5, 0.5, 0.5})
+}
+
+// loadIndices loads the indices stored in the specified accessor.
+func (g *GLTFLoader) loadIndices(ai int) (math32.ArrayU32, error) {
+
+	return g.loadAccessorU32(ai, "indices", []string{gltfLoader.SCALAR}, []int{gltfLoader.UNSIGNED_BYTE, gltfLoader.UNSIGNED_SHORT, gltfLoader.UNSIGNED_INT}) // TODO verify that it's ELEMENT_ARRAY_BUFFER
+}
+
+// addAttributeToVBO adds the appropriate attribute to the provided vbo based on the glTF attribute name.
+func (g *GLTFLoader) addAttributeToVBO(vbo *gls.VBO, attribName string, byteOffset uint32) {
+
+	aType, ok := gltfLoader.AttributeName[attribName]
+	if !ok {
+		// log.Warn(fmt.Sprintf("Attribute %v is not supported!", attribName))
+		return
+	}
+	vbo.AddAttribOffset(aType, byteOffset)
+}
+
+// isInterleaves returns whether the BufferView used by the provided accessor is interleaved.
+func (g *GLTFLoader) isInterleaved(accessor gltfLoader.Accessor) bool {
+
+	// Get the Accessor's BufferView
+	if accessor.BufferView == nil {
+		return false
+	}
+	bv := g.BufferViews[*accessor.BufferView]
+
+	// Calculates the size in bytes of a complete attribute
+	itemSize := gltfLoader.TypeSizes[accessor.Type]
+	itemBytes := int(gls.FloatSize) * itemSize
+
+	// If the BufferView stride is equal to the item size, the buffer is not interleaved
+	if bv.ByteStride == nil || *bv.ByteStride == itemBytes {
+		return false
+	}
+	return true
+}
+
+// LoadScene creates a parent Node which contains all nodes contained by
+// the specified scene index from the GLTF Scenes array.
+func (g *GLTFLoader) LoadScene(sceneIdx int) (core.INode, error) {
+
+	// Check if provided scene index is valid
+	if sceneIdx < 0 || sceneIdx >= len(g.Scenes) {
+		return nil, fmt.Errorf("invalid scene index")
+	}
+	// log.Debug("Loading Scene %d", sceneIdx)
+	sceneData := g.Scenes[sceneIdx]
+
+	scene := core.NewNode()
+	scene.SetName(sceneData.Name)
+
+	// Load all nodes
+	for _, ni := range sceneData.Nodes {
+		child, err := g.LoadNode(ni)
+		if err != nil {
+			return nil, err
+		}
+		scene.Add(child)
+	}
+	return scene, nil
+}
+
+// LoadNode creates and returns a new Node described by the specified index
+// in the decoded GLTF Nodes array.
+func (g *GLTFLoader) LoadNode(nodeIdx int) (core.INode, error) {
+
+	// Check if provided node index is valid
+	if nodeIdx < 0 || nodeIdx >= len(g.Nodes) {
+		return nil, fmt.Errorf("invalid node index")
+	}
+	nodeData := g.Nodes[nodeIdx]
+	// Return cached if available
+	// if nodeData.cache != nil {
+	// 	// log.Debug("Fetching Node %d (cached)", nodeIdx)
+	// 	return nodeData.cache, nil
+	// }
+	// log.Debug("Loading Node %d", nodeIdx)
+
+	var in core.INode
+	var err error
+	// Check if the node is a Mesh (triangles, lines, etc...)
+	if nodeData.Mesh != nil {
+		in, err = g.LoadMesh(*nodeData.Mesh)
+		if err != nil {
+			return nil, err
+		}
+
+		if nodeData.Skin != nil {
+
+			mesh, ok := in.(*graphic.Mesh)
+			if !ok {
+				fmt.Println("Mesh=", *nodeData.Mesh)
+				children := in.GetNode().Children()
+				if len(children) > 1 {
+					fmt.Println(children[0].GetNode().Name(), children[1].GetNode().Name())
+					return nil, fmt.Errorf("skinning/rigging meshes with more than a single primitive is not supported")
+				}
+				mesh = children[0].(*graphic.Mesh)
+			}
+
+			// Create RiggedMesh
+			rm := graphic.NewRiggedMesh(mesh)
+			skeleton, err := g.LoadSkin(*nodeData.Skin)
+			if err != nil {
+				return nil, err
+			}
+			rm.SetSkeleton(skeleton)
+			in = rm
+		}
+
+		// Check if the node is Camera
+	} else if nodeData.Camera != nil {
+		in, err = g.LoadCamera(*nodeData.Camera)
+		if err != nil {
+			return nil, err
+		}
+		// Other cases, return empty node
+	} else {
+		// log.Debug("Empty Node")
+		in = core.NewNode()
+	}
+
+	// Get *core.Node from core.INode
+	node := in.GetNode()
+	node.SetName(nodeData.Name)
+
+	// If defined, set node local transformation matrix
+	if nodeData.Matrix != nil {
+		node.SetMatrix((*math32.Matrix4)(nodeData.Matrix))
+		// Otherwise, check rotation, scale and translation fields
+	} else {
+		// Rotation quaternion
+		if nodeData.Rotation != nil {
+			node.SetQuaternion(nodeData.Rotation[0], nodeData.Rotation[1], nodeData.Rotation[2], nodeData.Rotation[3])
+		}
+		// Scale
+		if nodeData.Scale != nil {
+			node.SetScale(nodeData.Scale[0], nodeData.Scale[1], nodeData.Scale[2])
+		}
+		// Translation
+		if nodeData.Translation != nil {
+			node.SetPosition(nodeData.Translation[0], nodeData.Translation[1], nodeData.Translation[2])
+		}
+	}
+
+	// Cache node
+	// g.Nodes[nodeIdx].cache = in
+
+	// Recursively load node children and add them to the parent
+	for _, ci := range nodeData.Children {
+		child, err := g.LoadNode(ci)
+		if err != nil {
+			return nil, err
+		}
+		node.Add(child)
+	}
+
+	return in, nil
+}
+
+// ComponentBytesCount maps byte count to the number of components it contains.
+var ComponentBytesCount = map[int]int{
+	gltfLoader.BYTE:           1,
+	gltfLoader.UNSIGNED_BYTE:  1,
+	gltfLoader.SHORT:          2,
+	gltfLoader.UNSIGNED_SHORT: 2,
+	gltfLoader.UNSIGNED_INT:   4,
+	gltfLoader.FLOAT:          4,
 }
