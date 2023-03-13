@@ -68,7 +68,7 @@ func ParseBinReader(r io.Reader, path string) (*GLTFLoader, error) {
 		return nil, err
 	}
 
-	return &GLTFLoader{GLTF: gltf, data: data}, nil
+	return &GLTFLoader{GLTF: gltf, data: data, path: path}, nil
 }
 
 // readChunk reads a GLB chunk with the specified type and returns the data in a byte array.
@@ -111,11 +111,11 @@ func ParseBin(filename string) (*GLTFLoader, error) {
 	// Extract path from file
 	path := filepath.Dir(filename)
 	defer f.Close()
-	gltfDoc, err := gltfLoader.ParseBinReader(f, path)
+	gltfDoc, err := ParseBinReader(f, path)
 	if err != nil {
 		return nil, err
 	}
-	return &GLTFLoader{GLTF: gltfDoc, path: path}, nil
+	return gltfDoc, nil
 }
 
 // validateAccessor validates the specified attribute accessor with the specified allowed types and component types.
@@ -245,9 +245,9 @@ func (g *GLTFLoader) loadBufferView(bvIdx int) ([]byte, error) {
 	}
 	bvData := g.BufferViews[bvIdx]
 	// Return cached if available
-	if cache, ex := bufferViewCache[bvIdx]; ex {
-		return cache, nil
-	}
+	// if cache, ex := bufferViewCache[bvIdx]; ex {
+	// 	return cache, nil
+	// }
 
 	// Load buffer view buffer
 	buf, err := g.loadBuffer(bvData.Buffer)
@@ -260,12 +260,12 @@ func (g *GLTFLoader) loadBufferView(bvIdx int) ([]byte, error) {
 	if bvData.ByteOffset != nil {
 		offset = *bvData.ByteOffset
 	}
-
+	fmt.Printf("buffer len=%d offset=%d def.ByteLength=%d\n", len(buf), offset, bvData.ByteLength)
 	// Compute and return offset slice
 	bvBytes := buf[offset : offset+bvData.ByteLength]
 
 	// Cache buffer view
-	bufferViewCache[bvIdx] = bvBytes
+	// bufferViewCache[bvIdx] = bvBytes
 
 	return bvBytes, nil
 }
@@ -279,9 +279,9 @@ func (g *GLTFLoader) loadBuffer(bufIdx int) ([]byte, error) {
 	}
 	bufData := &g.Buffers[bufIdx]
 	// Return cached if available
-	if cache, ex := bufferCache[bufIdx]; ex {
-		return cache, nil
-	}
+	// if cache, ex := bufferCache[bufIdx]; ex {
+	// 	return cache, nil
+	// }
 
 	// If buffer URI use the chunk data field
 	if bufData.Uri == "" {
@@ -306,7 +306,7 @@ func (g *GLTFLoader) loadBuffer(bufIdx int) ([]byte, error) {
 		return nil, fmt.Errorf("buffer:%d read data length:%d expected:%d", bufIdx, len(data), bufData.ByteLength)
 	}
 	// Cache buffer data
-	bufferCache[bufIdx] = data
+	// bufferCache[bufIdx] = data
 
 	return data, nil
 }
