@@ -193,6 +193,7 @@ func (w *ObjectMgr) PutLastStatus(msg *worldProto.EntityStatus) error {
 		return err
 	}
 	res := w.Redis.Set(w.Ctx, w.ScopeName+":object:laststatus:"+msg.GetId(), statusBytes, 30*time.Second)
+	// res := w.Redis.Set(w.Ctx, w.ScopeName+":object:laststatus:"+msg.GetId()+":uid", statusBytes, 30*time.Second)
 	return res.Err()
 }
 

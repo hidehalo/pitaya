@@ -11,6 +11,7 @@ import (
 	"github.com/topfreegames/pitaya/v2"
 	"github.com/topfreegames/pitaya/v2/component"
 	worldProto "github.com/topfreegames/pitaya/v2/examples/demo/cluster/proto"
+	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/aoi"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/storage"
 	"github.com/topfreegames/pitaya/v2/logger/interfaces"
 	"github.com/topfreegames/pitaya/v2/serialize"
@@ -43,9 +44,10 @@ type World struct {
 	cg        map[string]bool
 	s         serialize.Serializer
 	region    string
+	lbs       *aoi.LBS
 }
 
-func NewWorld(app pitaya.Pitaya, streamMgr storage.StreamManager, redis *redis.Client) *World {
+func NewWorld(app pitaya.Pitaya, streamMgr storage.StreamManager, redis *redis.Client, lbs *aoi.LBS) *World {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := pitaya.GetDefaultLoggerFromCtx(ctx)
 	return &World{
@@ -58,6 +60,7 @@ func NewWorld(app pitaya.Pitaya, streamMgr storage.StreamManager, redis *redis.C
 		cg:        make(map[string]bool),
 		s:         jsonpb.NewSerializer(),
 		region:    fmt.Sprintf("%s:%s:%s", WorldRoom, app.GetServer().Type, app.GetServer().ID),
+		lbs:       lbs,
 	}
 }
 
@@ -125,7 +128,8 @@ func (w *World) Join(ctx context.Context, initStatus *worldProto.EntityStatus) (
 	s.OnClose(func() {
 		w.app.GroupRemoveMember(ctx, WorldRoom, s.UID())
 		s.SetData(map[string]interface{}{
-			"group": "",
+			"group":   "",
+			"lastLoc": nil,
 		})
 	})
 	// TODO: push to stream
@@ -146,39 +150,14 @@ func (w *World) Join(ctx context.Context, initStatus *worldProto.EntityStatus) (
 	if err != nil {
 		return nil, err
 	}
+	s.SetData(map[string]interface{}{
+		"lastLoc": [2]float64{initStatus.GetPosition().GetX(), initStatus.GetPosition().GetY()},
+	})
+	w.lbs.AddLocation(aoi.Location{X: initStatus.GetPosition().GetX(), Y: initStatus.GetPosition().GetY()}, s.UID())
 	statusSlice, err := objMgr.GetLastStatus()
 	if err != nil {
 		return nil, err
 	}
-
-	// statusBytes, err := w.s.Marshal(initStatus)
-	// if err != nil {
-	// 	logger.Error(err)
-	// 	return nil, err
-	// }
-	// key := fmt.Sprintf("room:%s:laststatus:%s", w.app.GetServerID(), initStatus.GetId())
-	// setRes := w.redis.Set(ctx, key, statusBytes, 30*time.Second)
-	// w.logger.Infof("Set key %s result=%s", key, setRes.Val())
-	// if setRes.Err() != nil {
-	// 	return nil, setRes.Err()
-	// }
-	// keyPattern := fmt.Sprintf("room:%s:laststatus:*", w.app.GetServerID())
-	// keys := w.redis.Keys(w.ctx, keyPattern)
-	// w.logger.Infof("keys result=%v, error=%v", keys.Val(), keys.Err())
-	// statusSlice := make([]*worldProto.EntityStatus, 0)
-	// if len(keys.Val()) > 0 {
-	// 	res := w.redis.MGet(w.ctx, keys.Val()...)
-	// 	w.logger.Infof("mget result=%v, error=%v", res.Val(), res.Err())
-	// 	for _, rawData := range res.Val() {
-	// 		entityStatus := &worldProto.EntityStatus{}
-	// 		err := w.s.Unmarshal([]byte(rawData.(string)), entityStatus)
-	// 		if err != nil {
-	// 			w.logger.Error("Unmarshal rawData error", err)
-	// 			continue
-	// 		}
-	// 		statusSlice = append(statusSlice, entityStatus)
-	// 	}
-	// }
 	err = w.app.GroupBroadcast(ctx, FrontEndType, WorldRoom, NewPlayer, &worldProto.PlayerJoin{
 		Uuid:     s.UID(),
 		Entities: statusSlice,

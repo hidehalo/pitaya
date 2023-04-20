@@ -15,6 +15,7 @@ import (
 	"github.com/topfreegames/pitaya/v2/component"
 	"github.com/topfreegames/pitaya/v2/config"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services"
+	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/aoi"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/simulate"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/storage"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/world"
@@ -37,13 +38,14 @@ func configureBackend() {
 	// 	component.WithName("room"),
 	// 	component.WithNameFunc(strings.ToLower),
 	// )
+	lbs := aoi.NewLBS()
 
-	app.Register(world.NewWorld(app, storage.NewRedisStreamManager(redisClient), redisClient),
+	app.Register(world.NewWorld(app, storage.NewRedisStreamManager(redisClient), redisClient, lbs),
 		component.WithName("world"),
 		component.WithNameFunc(strings.ToLower),
 	)
 
-	simulator := simulate.NewSimulateComponent(storage.NewRedisStreamManager(redisClient), app, redisClient)
+	simulator := simulate.NewSimulateComponent(storage.NewRedisStreamManager(redisClient), app, redisClient, lbs)
 	app.Register(simulator,
 		component.WithName("simulator"),
 		component.WithNameFunc(strings.ToLower),
@@ -103,12 +105,14 @@ func configureStandalone() {
 		DB:       0,                // use default DB
 	})
 
-	app.Register(world.NewWorld(app, storage.NewRedisStreamManager(redisClient), redisClient),
+	lbs := aoi.NewLBS()
+
+	app.Register(world.NewWorld(app, storage.NewRedisStreamManager(redisClient), redisClient, lbs),
 		component.WithName("world"),
 		component.WithNameFunc(strings.ToLower),
 	)
 
-	simulator := simulate.NewSimulateComponent(storage.NewRedisStreamManager(redisClient), app, redisClient)
+	simulator := simulate.NewSimulateComponent(storage.NewRedisStreamManager(redisClient), app, redisClient, lbs)
 	app.Register(simulator,
 		component.WithName("simulator"),
 		component.WithNameFunc(strings.ToLower),

@@ -8,6 +8,7 @@ import (
 	"github.com/topfreegames/pitaya/v2"
 	"github.com/topfreegames/pitaya/v2/component"
 	worldProto "github.com/topfreegames/pitaya/v2/examples/demo/cluster/proto"
+	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/aoi"
 	storage "github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/storage"
 	"github.com/topfreegames/pitaya/v2/examples/demo/cluster/services/world"
 	"github.com/topfreegames/pitaya/v2/serialize"
@@ -21,15 +22,17 @@ type SimulateComponent struct {
 	s         serialize.Serializer
 	redis     *redis.Client
 	region    string
+	lbs       *aoi.LBS
 }
 
-func NewSimulateComponent(streamMgr storage.StreamManager, app pitaya.Pitaya, redis *redis.Client) *SimulateComponent {
+func NewSimulateComponent(streamMgr storage.StreamManager, app pitaya.Pitaya, redis *redis.Client, lbs *aoi.LBS) *SimulateComponent {
 	return &SimulateComponent{
 		streamMgr: streamMgr,
 		app:       app,
 		s:         jsonpb.NewSerializer(),
 		redis:     redis,
 		region:    fmt.Sprintf("%s:%s:%s", world.WorldRoom, app.GetServer().Type, app.GetServer().ID),
+		lbs:       lbs,
 	}
 }
 
@@ -79,35 +82,18 @@ func (s *SimulateComponent) Forward(ctx context.Context, msg *worldProto.EntityS
 			return nil, err
 		}
 	}
+	if lastLoc, ex := sessionData["lastLoc"]; ex && lastLoc != nil {
+		lastLocF := lastLoc.([2]float64)
+		s.lbs.ReplaceLocation(
+			aoi.Location{X: lastLocF[0], Y: lastLocF[1]},
+			aoi.Location{X: msg.GetPosition().GetX(), Y: msg.GetPosition().GetY()},
+			session.UID(),
+			session.UID())
+	} else {
+		s.lbs.AddLocation(aoi.Location{X: msg.GetPosition().GetX(), Y: msg.GetPosition().GetY()}, session.UID())
+	}
+	session.SetData(map[string]interface{}{
+		"lastLoc": [2]float64{msg.GetPosition().GetX(), msg.GetPosition().GetY()},
+	})
 	return msg, nil
-
-	// statusBytes, err := s.s.Marshal(msg)
-	// if err != nil {
-	// 	logger.Error(err)
-	// 	return nil, err
-	// }
-	// // resultStreamId := fmt.Sprintf("%s:%s:%s", s.app.GetServer().Type, "simulator:result", msg.Id)
-	// resultStreamId := fmt.Sprintf("%s:%s:%s:%s", s.app.GetServer().Type, s.app.GetServer().ID, "simulator:result", msg.Id)
-	// s.redis.SAdd(ctx, world.EntityStoreKey, msg.Id)
-	// resultStream := s.streamMgr.CreateStream(resultStreamId)
-	// resultValues := make(map[string]interface{})
-	// resultValues["status"] = statusBytes
-	// redisXMsg := redis.XMessage{
-	// 	ID:     "*",
-	// 	Values: resultValues,
-	// }
-	// redisStreamMessage := &storage.RedisStreamMessage{XMessage: redisXMsg}
-	// _, err = resultStream.Add(ctx, redisStreamMessage)
-	// if err != nil {
-	// 	logger.Error(err)
-	// 	return nil, err
-	// }
-	// session := s.app.GetSessionFromCtx(ctx)
-	// sessionData := session.GetData()
-	// if groupName, ex := sessionData["group"]; ex && groupName.(string) != "" {
-	// 	key := fmt.Sprintf("room:%s:laststatus:%s", s.app.GetServerID(), msg.GetId())
-	// 	s.redis.Set(ctx, key, statusBytes, 30*time.Second)
-	// }
-
-	// return msg, nil
 }
